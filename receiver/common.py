@@ -608,6 +608,9 @@ def handle_store(event, args, app_logger):
             status.Status = 0xA700
             return status
 
+    # Insert StationAETitle tag
+    ds.add_new(0x00080055,'AE',"myAEtitle")
+    
     try:
         # We use `write_like_original=False` to ensure that a compliant
         #   File Meta Information Header is written
