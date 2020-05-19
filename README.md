@@ -1,7 +1,7 @@
 # BCU custom DICOM Router
 
- - [ ] sviluppare receiver.py copiando l'app storescp da pynetdicom
- - [ ] creare la cartella receiver
+ - [X] sviluppare receiver.py copiando l'app storescp da pynetdicom
+ - [X] creare la cartella receiver
  - [ ] creare il file common.py copiandolo da pynetdicom
  - [ ] modificare la funzione handle_store di receiver/common.py per:
 	 - [ ] aggiungere il codice centro sul tag StationAETitle
