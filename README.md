@@ -1,12 +1,13 @@
 # BCU custom DICOM Router
 
- - [X] sviluppare receiver.py copiando l'app storescp da pynetdicom
- - [X] creare la cartella receiver
- - [X] creare il file common.py copiandolo da pynetdicom
- - [ ] modificare la funzione handle_store di receiver/common.py per:
+ - [X] ~~sviluppare receiver.py copiando l'app storescp da pynetdicom~~
+ - [X] ~~creare la cartella receiver~~
+ - [X] ~~creare il file common.py copiandolo da pynetdicom~~
+ - [X] ~~modificare la funzione handle_store di receiver/common.py per:~~
+ - [ ] sviluppare receiver.py copiando l'app storescp da pynetdicom versione 1.4.X:
 	 - [ ] aggiungere il codice centro sul tag StationAETitle
 	 - [ ] effettuare le operazioni effettuate da getdcmtags (cioè creare il file .tags)
- - [ ] modificare il servizio receiver per lanciare il nostro receiver.py installation/hermes_receiver.service
+ - [X] modificare il servizio receiver per lanciare il nostro receiver.py installation/hermes_receiver.service
 
 # Hermes DICOM Router
 
