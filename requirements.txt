@@ -1,5 +1,6 @@
 daiquiri
 pydicom
+pynetdicom
 graphyte
 
 # documentation
