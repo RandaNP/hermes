@@ -309,7 +309,7 @@ def handle_store(event):
     # Try to save to output-directory
     if args.output_directory is not None:
         filename = os.path.join(args.output_directory, filename)
-    
+
     # Insert StationAETitle tag
     ds.add_new(0x00080055,'AE',"myAEtitle")
 
@@ -331,8 +331,8 @@ def handle_store(event):
         # Failed - Out of Resources - Miscellaneous error
         status_ds.Status = 0xA701
 
-    # execute "/home/hermes/hermes/bin/getdcmtags /home/hermes/hermes-data/incoming/#f 0.0.0.0:8080"
-    #subprocess.run(['/home/hermes/hermes/bin/getdcmtags', '/home/hermes/hermes-data/incoming/#f', '0.0.0.0:8080'])
+    #execute "/home/hermes/hermes/bin/getdcmtags /home/hermes/hermes-data/incoming/#f 0.0.0.0:8080"
+    subgetdcm = subprocess.check_output(['/home/hermes/hermes/bin/getdcmtags', '/home/hermes/hermes-data/incoming/#f', '0.0.0.0:8080'])
     #controllare come leggere stout per mandarlo in APP_LOGGER
     #verificare cos'è OFString_npos
     #controllare dcmtk storescp -xcr se # o #f sia un separatore di argomenti, in questo caso dividerli in subprocess.run
