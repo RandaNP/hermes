@@ -4,9 +4,9 @@
  - [X] ~~creare la cartella receiver~~
  - [X] ~~creare il file common.py copiandolo da pynetdicom~~
  - [X] ~~modificare la funzione handle_store di receiver/common.py per:~~
- - [ ] sviluppare receiver.py copiando l'app storescp da pynetdicom versione 1.4.X:
-	 - [ ] aggiungere il codice centro sul tag StationAETitle
-	 - [ ] effettuare le operazioni effettuate da getdcmtags (cioè creare il file .tags)
+ - [X] sviluppare receiver.py copiando l'app storescp da pynetdicom versione 1.4.X:
+	 - [X] aggiungere il codice centro sul tag StationAETitle
+	 - [X] effettuare le operazioni effettuate da getdcmtags (cioè creare il file .tags)
  - [X] modificare il servizio receiver per lanciare il nostro receiver.py installation/hermes_receiver.service
 
 # Hermes DICOM Router

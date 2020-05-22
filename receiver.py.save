@@ -136,7 +136,7 @@ def setup_logger():
     formatter = logging.Formatter('%(levelname).1s: %(message)s')
     handler.setFormatter(formatter)
     logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.ERROR)
 
     return logger
 
@@ -338,11 +338,11 @@ def handle_store(event):
     #controllare dcmtk storescp -xcr se # o #f sia un separatore di argomenti, in questo caso dividerli in subprocess.run
     
     try:
-        subgetdcm = subprocess.check_output(['/home/hermes/hermes/bin/getdcmtags', filename, '0.0.0.0:8080'])
+        subgetdcm = subprocess.check_output(['/home/hermes/hermes/bin/getdcmtags', '/home/hermes/hermes-data/incoming/#f', '0.0.0.0:8080'])
         APP_LOGGER.info('subprocess.check_output = {0!s}'.format(subgetdcm))
         
     except subprocess.CalledProcessError as err:
-        APP_LOGGER.error('subprocess.check_output = {0!s}'.format(err.output))
+APP_LOGGER.error('subprocess.check_output =  '.format(err.output))
     
     return status_ds
 
