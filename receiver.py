@@ -7,6 +7,7 @@ from logging.config import fileConfig
 import os
 import socket
 import sys
+import subprocess
 
 from pydicom.dataset import Dataset
 from pydicom.uid import (
@@ -331,12 +332,18 @@ def handle_store(event):
         # Failed - Out of Resources - Miscellaneous error
         status_ds.Status = 0xA701
 
-    #execute "/home/hermes/hermes/bin/getdcmtags /home/hermes/hermes-data/incoming/#f 0.0.0.0:8080"
-    subgetdcm = subprocess.check_output(['/home/hermes/hermes/bin/getdcmtags', '/home/hermes/hermes-data/incoming/#f', '0.0.0.0:8080'])
+    #execute "/home/hermes/hermes/bin/getdcmtags /home/hermes/hermes-data/incoming/#f 0.0.0.0:8080"   
     #controllare come leggere stout per mandarlo in APP_LOGGER
     #verificare cos'è OFString_npos
     #controllare dcmtk storescp -xcr se # o #f sia un separatore di argomenti, in questo caso dividerli in subprocess.run
-
+    
+    try:
+        subgetdcm = subprocess.check_output(['/home/hermes/hermes/bin/getdcmtags', '/home/hermes/hermes-data/incoming/#f', '0.0.0.0:8080'])
+        APP_LOGGER.info('subprocess.check_output = {0!s}'.format(subgetdcm))
+        
+    except subprocess.CalledProcessError as err:
+        APP_LOGGER.error('subprocess.check_output = {0!s}'.format(err.output))
+    
     return status_ds
 
 handlers = [(evt.EVT_C_STORE, handle_store)]
