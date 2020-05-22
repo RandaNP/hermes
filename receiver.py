@@ -332,7 +332,7 @@ def handle_store(event):
         status_ds.Status = 0xA701
 
     # execute "/home/hermes/hermes/bin/getdcmtags /home/hermes/hermes-data/incoming/#f 0.0.0.0:8080"
-    subprocess.run(['/home/hermes/hermes/bin/getdcmtags', '/home/hermes/hermes-data/incoming/#f', '0.0.0.0:8080'])
+    #subprocess.run(['/home/hermes/hermes/bin/getdcmtags', '/home/hermes/hermes-data/incoming/#f', '0.0.0.0:8080'])
     #controllare come leggere stout per mandarlo in APP_LOGGER
     #verificare cos'è OFString_npos
     #controllare dcmtk storescp -xcr se # o #f sia un separatore di argomenti, in questo caso dividerli in subprocess.run
