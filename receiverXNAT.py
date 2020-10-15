@@ -483,7 +483,9 @@ def handle_store(event):
 
         if resp['success'] is True:
     
-            if resp['data'] == {}:
+            respLenData = len (resp['data'])
+
+            if resp['data'] == []: # Nessun StudyInstaceUID Trovato!
     
                 APP_LOGGER.info("StudyInstanceUID = " + ds.StudyInstanceUID + " -> NOT FOUND in DEID-DB")
     
@@ -602,10 +604,16 @@ def handle_store(event):
     
                     qtcLogout   = qtcApiLogout(qtcLogin,APP_LOGGER)
       
-            else:
-                APP_LOGGER.info("StudyInstanceUID =" + ds.StudyInstanceUID + " -> FOUNDED.")
+            elif respLenData == 1: # Unico StudyInstaceUID Trovato!
+                
+                APP_LOGGER.debug("len ( resp['data'] ) = " + str(respLenData) )
+
+                APP_LOGGER.info("StudyInstanceUID = " + ds.StudyInstanceUID + " -> FOUNDED.")
     
-                deidExam = resp['data']
+                deidExam = resp['data'][0]
+
+                APP_LOGGER.debug("deidExam = " + str(deidExam))
+                
                 if not biobanca and (deidExam['associationId'] is None or (str(deidExam['associationId'])) != assocId):
                     # API per aggiornamento dello stato e associantionId dell'esame
                     url = api_deid_path + "/v1/exams/" + str(deidExam['id'])
@@ -626,9 +634,10 @@ def handle_store(event):
                     
                     APP_LOGGER.info('StudyInstanceUID = {} (id = {}) -> NO UPDATE'.format( ds.StudyInstanceUID, deidExam['id'] ) )
     
-        else:
-            APP_LOGGER.info("StudyInstanceUID =" + ds.StudyInstanceUID + " -> MULTIPLE STUDY INSTANCE FOUND!.")
-            # TO-DO: aggiungere notifica mail
+            else:
+                
+                APP_LOGGER.error("StudyInstanceUID =" + ds.StudyInstanceUID + " -> MULTIPLE STUDY INSTANCE FOUND!.")
+                # TO-DO: aggiungere notifica mail
     
         deidExam = {
             'dateInterval': deidExam['patient']['dateInterval'],
