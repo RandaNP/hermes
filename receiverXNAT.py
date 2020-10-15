@@ -40,6 +40,10 @@ from pynetdicom import (
 # App-specific includes
 import common.config as config
 
+# For surpress Insecure Warning
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 # Deid temp workaround includes
 import tagfunctions
 from tagactions import tags
@@ -210,6 +214,17 @@ if args.log_config:
 
 APP_LOGGER.debug('$storescp.py v{0!s}'.format(VERSION))
 APP_LOGGER.debug('')
+
+# Telegram BOT Alert
+def telegram_bot_sendtext(bot_message):
+    bot_token = '1397633971:AAGLUuCmc0QhvCXGzkDi04i_bGCfvKslW98'
+    bot_chatID = '-1001340592635'
+    send_text = 'https://api.telegram.org/bot{}/sendMessage?chat_id={}&parse_mode=Markdown&text={}'.format(bot_token, bot_chatID, bot_message)
+
+    response = requests.get(send_text)
+
+    return response.json()
+
 
 # Validate port
 if isinstance(args.port, int):
@@ -404,9 +419,8 @@ def handle_store(event):
     else:
         # Check callingAETitle
         callingAEList = {
-            'AET1': 'AET1',
-            'SYNGOVIA123': 'SDN',
-            'ALTROSDN': 'SDN',
+            'AET-TEST': 'SDN-test',
+            'SYVIA131234': 'SDN',
         }
         try:
             callingAETitle = callingAEList[callingAETitle]
@@ -428,36 +442,27 @@ def handle_store(event):
 
                 if qtcClinic['code'] == 200:
                     qtcClinicOid = qtcClinic['data'][0]['_id']['$oid']
-                    APP_LOGGER.info("$oid = " + qtcClinicOid)
+                    APP_LOGGER.info("qtcClinic ($oid) = " + qtcClinicOid)
                 elif qtcClinic['code'] == 201:
                     raise LookupError
 
         except (KeyError, LookupError) as e:
-            APP_LOGGER.warning('AETitle not in list!')
+            APP_LOGGER.warning("AETitle -{}- not in list!".format(callingAETitle))
             AETitleNotInListNotify = Path('/'.join([
                 config.hermes['error_folder'],
-                '_'.join([callingIP, callingAETitle]),
-                'notInList'
+                '_'.join([callingIP, callingAETitle, 'notInList']),
             ]))
             if not AETitleNotInListNotify.exists():
                 if type(e) == KeyError:
-                    subject = 'Hermes - AET not in list: {}'
+                    subject = 'Hermes - AET not in list: {} - {}'
                 else:
-                    subject = 'Hermes - Clinic not in qTC: {}'
+                    subject = 'Hermes - Clinic not in qTC: {} - {}'
 
-                message = Mail(
-                    from_email = 'alert@biocheckup.net',
-                    to_emails = 'mrandon.biocheckup@gmail.com',
-                    subject = subject.format(callingAETitle),
-                    html_content = 'IP: {}'.format(callingIP)
-                )
                 try:
-                    sg = SendGridAPIClient('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')
-                    response = sg.send(message)
-                except Exception as e:
-                    APP_LOGGER.error(e.message)
-            else:
-                AETitleNotInListNotify.touch()
+                    telegram_bot_sendtext(subject.format(callingAETitle, callingIP))
+                    AETitleNotInListNotify.touch()
+                except Exception as e1:
+                    APP_LOGGER.ERROR(e1.message)
             # Not Authorized
             status_ds.Status = 0x0124
             status_ds.ErrorComment = 'Not Authorized'
@@ -466,36 +471,37 @@ def handle_store(event):
         ds.add_new(0x00080055, 'AE', 'QCS')
 
     if not studyProcessed.exists():
-        # controlliamo se esame esiste in DEID-DB API [examExist(StudyInstanceUID)]
-        #   - se non esiste creiamo l'esame in DEID-DB API [newExam(args..., NUOVO)]
+        
         url = api_deid_path + "/v1/exams?studyInstanceUID=" + ds.StudyInstanceUID 
     
-        APP_LOGGER.info("Call Api: Exist Exam ({})".format(url))
+        APP_LOGGER.debug("Call Api: Exist Exam ({})".format(url)) # Per Debug
         
         resp = requests.get(
             url,
             headers = {'Content-type': 'application/json'}
         ).json()
     
+        APP_LOGGER.debug("Resp Api: Exist Exam ({})".format(resp))  # Per Debug
+
         if resp['success'] is True:
     
             if resp['data'] == {}:
     
-                APP_LOGGER.info("StudyInstanceUID =" + ds.StudyInstanceUID + " -> NOT FOUND -> Creating....")
+                APP_LOGGER.info("StudyInstanceUID = " + ds.StudyInstanceUID + " -> NOT FOUND in DEID-DB")
     
                 # Questa parte è da togliere, mi serve solo per generare
                 # un paziente con un nome diverso per il testing!.
                 currentDateTime = datetime.now()
                 pN = "PAZIENTE_"+str(currentDateTime.strftime(("%H%M%S")))+str("^^^")
     
-                APP_LOGGER.info("pN = "+pN)
+                APP_LOGGER.debug("pN = "+pN)
     
                 chars = re.escape(string.punctuation)
                 # Institution Name
                 institutionName = ds.get("InstitutionName", '').upper()
                 institutionName = re.sub(r'['+chars+']', '',institutionName)
     
-                APP_LOGGER.info("institutionName = " + str(institutionName))
+                APP_LOGGER.debug("institutionName = " + str(institutionName))
     
                 # Nota. I campi studyDate e studyDescription non vanno passati nella
                 #       creazione dell'esame poichè sarà l'API a crearli secondo 
@@ -513,7 +519,6 @@ def handle_store(event):
                     'origStudyDate'         : str(ds.get("StudyDate", '')), 
                     'origStudyDescription'  : str(ds.get("StudyDescription", '')),
                     
-        #           'studyInstanceUID'      : '1.2.752.24.7.1666143006.44477432785423253',
                     'studyInstanceUID'      : str(ds.StudyInstanceUID),
                     'assocId'               : assocId,
                 }
@@ -522,25 +527,32 @@ def handle_store(event):
                 else:
                     deidExam['status'] = 'NUOVO'
     
-                APP_LOGGER.info("deidPayload = " + str(deidExam) )
-            
-                APP_LOGGER.info("Call Api: Create Exam {}".format(str(url)))
+                APP_LOGGER.debug("Call Api: Create Exam")
+                
                 resp = requests.post(
                     api_deid_path + '/v1/exams',
                     json = deidExam,
                     headers = {'Content-type': 'application/json'}
                 ).json()
+               
+                # Nota! La chiamata API appena eseguita aggiunge ulteriori 
+                #       chiavi al dict ovvero: ['patient']['institution']
+
+                APP_LOGGER.debug("Resp Api: Create Exam {}".format(str(resp)))
+
                 if resp['success']:
                     deidExam = resp['data']
-                    APP_LOGGER.info('deidExam create correctly! {} - {} - {}'.format(callingIP, callingAETitle, ds.StudyInstanceUID))
+                    #APP_LOGGER.info('deidExam create correctly! {} - {} - {}'.format(callingIP, callingAETitle, ds.StudyInstanceUID))
+                    APP_LOGGER.info("StudyInstanceUID = " + ds.StudyInstanceUID + " -> CREATED in DEID-DB")
                 else:
-                    APP_LOGGER.error('Unable to create deidExam: {} - {} - {}'.format(callingIP, callingAETitle, ds.StudyInstanceUID))
+                    #APP_LOGGER.error('Unable to create deidExam: {} - {} - {}'.format(callingIP, callingAETitle, ds.StudyInstanceUID))
+                    APP_LOGGER.error("StudyInstanceUID = " + ds.StudyInstanceUID + " -> UNABLE to CREATE in DEID-DB")
                     return 0xA700
     
     
                 if not biobanca:
                     
-                    APP_LOGGER.info("Preparing qtcExam....")
+                    APP_LOGGER.debug("Preparing qtcExam....")
                     
                     pN = deidExam['patient']['patientName'] + str(currentDateTime.strftime(("%H%M%S")))
     
@@ -552,7 +564,7 @@ def handle_store(event):
                             "last_name"     : "XXX", 
                             "birthdate"     : deidExam['patient']['patientBirthDate'],
                             "birthplace"    : "XXX", # Comune di nascita - non presente in DICOM 
-                            "gender"        : ds.get("PatientSex", ''), 
+                            "gender"        : ds.get("PatientSex","M"),
                             "phone_number"  : "XXX" 
                         },
     
@@ -573,15 +585,21 @@ def handle_store(event):
                             #"anamnesis"             :"Anamnesi" # DA INSERIRE DAL MEDICO INVIANTE SU INTERFACCIA
                         }
                     }
-    
-                    APP_LOGGER.info("qtcExam = " + str(qtcExam))
+
+                    # Caso in cui ci sia il tag ma è vuoto -> Default = M!
+                    if qtcExam["patient_data"]["gender"] == "":
+                       qtcExam["patient_data"]["gender"] = "M"
+
+                    APP_LOGGER.debug("qtcExam = " + str(qtcExam))
        
                     qtcCreate = qtcApiExaminationCreate(qtcLogin,qtcExam,APP_LOGGER)
         
                     if qtcCreate['code'] == 300 and qtcCreate['message'] == "Examination correctly created!":
-                        APP_LOGGER.info("Esame creato correttamente su qTC")
+                        #APP_LOGGER.info("Esame creato correttamente su qTC")
+                        APP_LOGGER.info("StudyInstanceUID = " + ds.StudyInstanceUID + " -> CREATED in qTC")
                     else:
-                        APP_LOGGER.error('Unable to create qtcExam: {} - {} - {}'.format(callingIP, callingAETitle, ds.StudyInstanceUID))
+                        #APP_LOGGER.error('Unable to create qtcExam: {} - {} - {}'.format(callingIP, callingAETitle, ds.StudyInstanceUID))
+                        APP_LOGGER.info("StudyInstanceUID = " + ds.StudyInstanceUID + " -> UNABLE to CREATE in qTC")
                         return 0xA700
     
                     qtcLogout   = qtcApiLogout(qtcLogin,APP_LOGGER)
@@ -594,18 +612,21 @@ def handle_store(event):
                     # API per aggiornamento dello stato e associantionId dell'esame
                     url = api_deid_path + "/v1/exams/" + str(deidExam['id'])
                      
-                    APP_LOGGER.info("Call Api: Update Exam {}".format(url))
+                    APP_LOGGER.debug("Call Api: Update Exam {}".format(url))
     
-                    resp = requests.put(
+                    resp = requests.patch(
                         api_deid_path + '/v1/exams/' + str(deidExam['id']),
                         json = {'status':'NUOVO', 'associationId': assocId},
                         headers = {'Content-type': 'application/json'}
                     ).json()
     
-                    APP_LOGGER.info("Exam (with id =" +str(deidExam['id']) +") was updated!")
+                    APP_LOGGER.debug("Resp Api: Update Exam {}".format(resp))
+
+                    APP_LOGGER.info('StudyInstanceUID = {} (id = {}) -> UPDATED!'.format( ds.StudyInstanceUID, deidExam['id'] ) )
     
                 else:
-                    APP_LOGGER.info("Nothing to do...")
+                    
+                    APP_LOGGER.info('StudyInstanceUID = {} (id = {}) -> NO UPDATE'.format( ds.StudyInstanceUID, deidExam['id'] ) )
     
         else:
             APP_LOGGER.info("StudyInstanceUID =" + ds.StudyInstanceUID + " -> MULTIPLE STUDY INSTANCE FOUND!.")
@@ -623,31 +644,38 @@ def handle_store(event):
         bcuCheckDir.mkdir(exist_ok = True)
         studyProcessed.write_text(json.dumps(deidExam))
 
-        APP_LOGGER.info('-----------------------------------------------------------------------------------')
+        
     else: # studyProcessed.exist() == True
         deidExam = json.loads(studyProcessed.read_text())
 
     if biobanca:
-        APP_LOGGER.info('Deidentificazione per biobanca')
+        APP_LOGGER.info('DEID XNAT:')  
         ds.remove_private_tags()
-        APP_LOGGER.info('tag privati rimossi')
-        APP_LOGGER.info('deidExam: {}'.format(deidExam))
-        #resp = requests.post(
-        #    api_deid_path +'/v1/deid',
-        #    json = {
-        #        'dataset': ds,
-        #        'dateInterval': deidExam['dateInterval'],
-        #        'bcuInstitutionId': deidExam['bcuInstitutionId'],
-        #        'bcuPatientID': deidExam['bcuPatientID']
-        #    },
-        #    headers = {'Content-type': 'application/json'}
-        #).json()
-        #if resp['success']:
-        #    ds.from_json(resp['data'])
-        #else:
-        #    status_ds.Status = 0x0110
-        #    status_ds.ErrorComment = 'Internal de-identification error'
-        #    return status_ds
+        APP_LOGGER.debug('tag privati rimossi')
+        APP_LOGGER.debug('deidExam: {}'.format(deidExam))
+        
+        '''
+        resp = requests.post(
+            api_deid_path +'/v1/deid',
+            json = {
+                'dataset': ds,
+                'dateInterval': deidExam['dateInterval'],
+                'bcuInstitutionId': deidExam['bcuInstitutionId'],
+                'bcuPatientID': deidExam['bcuPatientID']
+            },
+            headers = {'Content-type': 'application/json'}
+        ).json()
+
+        if resp['success']:
+            APP_LOGGER.info('StudyInstanceUID = {}-> DEID SUCCESS!'.format( ds.StudyInstanceUID ) )
+            ds.from_json(resp['data'])           
+        
+        else:
+            status_ds.Status = 0x0110
+            status_ds.ErrorComment = 'Internal de-identification error'
+            APP_LOGGER.info('StudyInstanceUID = {} -> DEID FAIL!'.format( ds.StudyInstanceUID ) )
+            return status_ds
+        '''
 
         # Deid temp workaround
         # prepare deidentification information

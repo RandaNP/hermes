@@ -37,14 +37,32 @@ from pynetdicom import (
     PYNETDICOM_IMPLEMENTATION_VERSION
 )
 
-import smtplib, ssl
-
 # App-specific includes
 import common.config as config
 
 # For surpress Insecure Warning
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# Deid temp workaround includes
+import tagfunctions
+from tagactions import tags
+# DeIdentificationMethodCodeSeq based on Table CID 7050 from DICOM Standard
+deidMeth = {
+    '113100': 'Basic Application Confidentiality Profile',
+    '113101': 'Clean Pixel Data Option',
+    '113102': 'Clean Recognizable Visual Features Option',
+    '113103': 'Clean Graphics Option',
+    '113104': 'Clean Structured Content Option',
+    '113105': 'Clean Descriptors Option',
+    '113106': 'Retain Longitudinal With Full Dates Option',
+    '113107': 'Retain Longitudinal With Modified Dates Option',
+    '113108': 'Retain Patient Characteristics Option',
+    '113109': 'Retain Device Identity Option',
+    '113110': 'Retain UIDs',
+    '113111': 'Retain Safe Private Option',
+}
+###
 
 VERSION = '0.5.1'
 
@@ -196,6 +214,17 @@ if args.log_config:
 
 APP_LOGGER.debug('$storescp.py v{0!s}'.format(VERSION))
 APP_LOGGER.debug('')
+
+# Telegram BOT Alert
+def telegram_bot_sendtext(bot_message):
+    bot_token = '1397633971:AAGLUuCmc0QhvCXGzkDi04i_bGCfvKslW98'
+    bot_chatID = '-1001340592635'
+    send_text = 'https://api.telegram.org/bot{}/sendMessage?chat_id={}&parse_mode=Markdown&text={}'.format(bot_token, bot_chatID, bot_message)
+
+    response = requests.get(send_text)
+
+    return response.json()
+
 
 # Validate port
 if isinstance(args.port, int):
@@ -398,8 +427,7 @@ def handle_store(event):
         # Check callingAETitle
         callingAEList = {
             'AET-TEST': 'SDN-test',
-            'SYNGOVIA123': 'SDN',
-            'ALTROSDN': 'SDN',
+            'SYVIA131234': 'SDN',
         }
         try:
             callingAETitle = callingAEList[callingAETitle]
@@ -429,28 +457,19 @@ def handle_store(event):
             APP_LOGGER.warning("AETitle -{}- not in list!".format(callingAETitle))
             AETitleNotInListNotify = Path('/'.join([
                 config.hermes['error_folder'],
-                '_'.join([callingIP, callingAETitle]),
-                'notInList'
+                '_'.join([callingIP, callingAETitle, 'notInList']),
             ]))
             if not AETitleNotInListNotify.exists():
                 if type(e) == KeyError:
-                    subject = 'Hermes - AET not in list: {}'
+                    subject = 'Hermes - AET not in list: {} - {}'
                 else:
-                    subject = 'Hermes - Clinic not in qTC: {}'
+                    subject = 'Hermes - Clinic not in qTC: {} - {}'
 
-                message = Mail(
-                    from_email = 'alert@biocheckup.net',
-                    to_emails = 'mrandon.biocheckup@gmail.com',
-                    subject = subject.format(callingAETitle),
-                    html_content = 'IP: {}'.format(callingIP)
-                )
                 try:
-                    sg = SendGridAPIClient('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')
-                    response = sg.send(message)
-                except Exception as e:
-                    APP_LOGGER.error(e.message)
-            else:
-                AETitleNotInListNotify.touch()
+                    telegram_bot_sendtext(subject.format(callingAETitle, callingIP))
+                    AETitleNotInListNotify.touch()
+                except Exception as e1:
+                    APP_LOGGER.ERROR(e1.message)
             # Not Authorized
             status_ds.Status = 0x0124
             status_ds.ErrorComment = 'Not Authorized'
@@ -605,7 +624,7 @@ def handle_store(event):
                 APP_LOGGER.debug("deidExam = " + str(deidExam))
                 
                 if not biobanca and (deidExam['associationId'] is None or (str(deidExam['associationId'])) != assocId):
-                    
+                    # API per aggiornamento dello stato e associantionId dell'esame
                     url = api_deid_path + "/v1/exams/" + str(deidExam['id'])
                      
                     APP_LOGGER.debug("Call Api: Update Exam {}".format(url))
@@ -651,8 +670,7 @@ def handle_store(event):
         APP_LOGGER.debug('tag privati rimossi')
         APP_LOGGER.debug('deidExam: {}'.format(deidExam))
         
-        resp['success'] = False # Altrimenti considera quello precedente!!!
-        '''
+        ''' # ricordarsi di rimuovere la forzatura sotto
         resp = requests.post(
             api_deid_path +'/v1/deid',
             json = {
@@ -664,6 +682,8 @@ def handle_store(event):
             headers = {'Content-type': 'application/json'}
         ).json()
         '''
+        resp['success'] = False # poichè abbiamo disattivato la request per la de-id
+
         if resp['success']:
             APP_LOGGER.info('StudyInstanceUID = {}-> DEID SUCCESS!'.format( ds.StudyInstanceUID ) )
             ds.from_json(resp['data'])           
@@ -673,6 +693,45 @@ def handle_store(event):
             status_ds.ErrorComment = 'Internal de-identification error'
             APP_LOGGER.info('StudyInstanceUID = {} -> DEID FAIL!'.format( ds.StudyInstanceUID ) )
             return status_ds
+
+        # Deid temp workaround
+        # prepare deidentification information
+        deidMethSeq = []
+        for option in ['113100', '113107', '113108', '113109', '113110']: # questa lista potrebbe essere definita nel template e rappresenta le opzioni di deidentificazione usate dal template
+            deidMethEl = Dataset()
+            deidMethEl.CodeValue = option
+            deidMethEl.CodingSchemeDesignator = 'DCM'
+            deidMethEl.CodingMeaning = deidMeth[option]
+            deidMethSeq.append(deidMethEl)
+
+            # BCU Private Block
+            # add BlockOwner tag
+            dataset.add_new(0x00130010, 'CS', 'BCU')
+            dataset.add_new(0x001310ff, 'IS', deidExam['dateInterval'])
+            dataset.add_new(0x001310fe, 'CS', deidExam['bcuInstitutionId'])
+            dataset.add_new(0x001310fd, 'CS', deidExam['bcuPatientID'])
+            for tag in tags.keys():
+                try:
+                    operation = tags[tag][0]
+                    if operation == 'regex':
+                        pass
+                    elif operation == 'function':
+                        exec('tagfunctions.'+tags[tag][1]+'(tag, dataset)')
+                except:
+                    pass
+
+            # insert de-identification information
+            dataset.PatientIdentifiedRemoved = 'YES'
+            dataset.DeidentificationMethod = '{Per DICOM PS 3.15 AnnexE. Details in 0012,0064}'
+            dataset.DeidentificationMethodCodeSequence = deidMethSeq
+            dataset.LongitudinalTemporalInformationModified = 'MODIFIED'
+
+            # REMOVE BCU INTERNAL VARS FROM dataset
+            del dataset[0x00130010] # Block Owner
+            del dataset[0x001310ff] # patient.dateInterval
+            del dataset[0x001310fe] # bcuInstitutionId
+            del dataset[0x001310fd] # patient.bcuPatientID
+            #####
    
     try:
         # We use `write_like_original=False` to ensure that a compliant
