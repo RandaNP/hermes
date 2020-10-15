@@ -7,7 +7,7 @@ Requires=network.target
 [Service]
 Type=simple
 WorkingDirectory=/home/hermes/hermes
-ExecStart=/home/hermes/hermes-env/bin/python /home/hermes/hermes/receiver.py -od /home/hermes/hermes-data/incoming 104
+ExecStart=/home/hermes/hermes-env/bin/python /home/hermes/hermes/receiverTest.py -aet BCU_ROUTER -od /home/hermes/hermes-data/incoming 11112
 
 Restart=on-failure
 RestartSec=3

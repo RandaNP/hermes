@@ -1,0 +1,16 @@
+[Unit]
+Description=Hermes Receier
+Documentation=https://hermes-router.github.io/
+After=network.target
+Requires=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/hermes/hermes
+ExecStart=/home/hermes/hermes-env/bin/python /home/hermes/hermes/receiverXNAT.py -aet BCU_ROUTER -od /home/hermes/hermes-data/incoming 104
+
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
