@@ -16,8 +16,6 @@ import string
 import ipaddress
 from pathlib import Path
 from qTcApi import qtcApiLogin, qtcApiLogout, qtcApiExaminationCreate, qtcApiExaminationList
-from sendgrid import SendGridAPIClient
-from sendgrid.helpers.mail import Mail
 
 
 from pydicom.dataset import Dataset
