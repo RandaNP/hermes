@@ -679,7 +679,7 @@ def handle_store(event):
             },
             headers = {'Content-type': 'application/json'}
         ).json()
-        '''
+        
         resp['success'] = False # poichè abbiamo disattivato la request per la de-id
 
         if resp['success']:
@@ -691,46 +691,52 @@ def handle_store(event):
             status_ds.ErrorComment = 'Internal de-identification error'
             APP_LOGGER.info('StudyInstanceUID = {} -> DEID FAIL!'.format( ds.StudyInstanceUID ) )
             return status_ds
-
+        '''
         # Deid temp workaround
         # prepare deidentification information
         deidMethSeq = []
         for option in ['113100', '113107', '113108', '113109', '113110']: # questa lista potrebbe essere definita nel template e rappresenta le opzioni di deidentificazione usate dal template
+            
             deidMethEl = Dataset()
             deidMethEl.CodeValue = option
             deidMethEl.CodingSchemeDesignator = 'DCM'
             deidMethEl.CodingMeaning = deidMeth[option]
             deidMethSeq.append(deidMethEl)
 
-            # BCU Private Block
-            # add BlockOwner tag
-            dataset.add_new(0x00130010, 'CS', 'BCU')
-            dataset.add_new(0x001310ff, 'IS', deidExam['dateInterval'])
-            dataset.add_new(0x001310fe, 'CS', deidExam['bcuInstitutionId'])
-            dataset.add_new(0x001310fd, 'CS', deidExam['bcuPatientID'])
-            for tag in tags.keys():
-                try:
-                    operation = tags[tag][0]
-                    if operation == 'regex':
-                        pass
-                    elif operation == 'function':
-                        exec('tagfunctions.'+tags[tag][1]+'(tag, dataset)')
-                except:
+        # BCU Private Block
+        # add BlockOwner tag
+        ds.add_new(0x00130010, 'CS', 'BCU')
+        ds.add_new(0x001310ff, 'IS', deidExam['dateInterval'])
+        ds.add_new(0x001310fe, 'CS', deidExam['bcuInstitutionId'])
+        ds.add_new(0x001310fd, 'CS', deidExam['bcuPatientID'])
+
+        tags["PatientName"]     = ["function", "keeptag"]
+        tags["PatientID"]       = ["function", "keeptag"]
+        tags["InstitutionName"] = ["function", "keeptag"]
+
+        for tag in tags.keys():
+            try:
+                operation = tags[tag][0]
+                if operation == 'regex':
                     pass
+                elif operation == 'function':
+                    exec('tagfunctions.'+tags[tag][1]+'(tag, ds)')
+            except:
+                pass
+                    
+        # insert de-identification information
+        ds.PatientIdentifiedRemoved = 'YES'
+        ds.DeidentificationMethod = '{Per DICOM PS 3.15 AnnexE. Details in 0012,0064}'
+        ds.DeidentificationMethodCodeSequence = deidMethSeq
+        ds.LongitudinalTemporalInformationModified = 'MODIFIED'
 
-            # insert de-identification information
-            dataset.PatientIdentifiedRemoved = 'YES'
-            dataset.DeidentificationMethod = '{Per DICOM PS 3.15 AnnexE. Details in 0012,0064}'
-            dataset.DeidentificationMethodCodeSequence = deidMethSeq
-            dataset.LongitudinalTemporalInformationModified = 'MODIFIED'
-
-            # REMOVE BCU INTERNAL VARS FROM dataset
-            del dataset[0x00130010] # Block Owner
-            del dataset[0x001310ff] # patient.dateInterval
-            del dataset[0x001310fe] # bcuInstitutionId
-            del dataset[0x001310fd] # patient.bcuPatientID
-            #####
-   
+        # REMOVE BCU INTERNAL VARS FROM dataset
+        del ds[0x00130010] # Block Owner
+        del ds[0x001310ff] # patient.dateInterval
+        del ds[0x001310fe] # bcuInstitutionId
+        del ds[0x001310fd] # patient.bcuPatientID
+        #####
+ 
     try:
         # We use `write_like_original=False` to ensure that a compliant
         #   File Meta Information Header is written
@@ -754,6 +760,7 @@ def handle_store(event):
     except subprocess.CalledProcessError as err:
         APP_LOGGER.error('getdcmtags --> {0!s}'.format(err.output))
     
+    APP_LOGGER.info("handle_store END")
     return status_ds
 
 handlers = [(evt.EVT_C_STORE, handle_store)]
