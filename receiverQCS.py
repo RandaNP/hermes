@@ -214,10 +214,9 @@ APP_LOGGER.debug('$storescp.py v{0!s}'.format(VERSION))
 APP_LOGGER.debug('')
 
 # Telegram BOT Alert
-def telegram_bot_sendtext(bot_message):
-    bot_token = '1397633971:AAGLUuCmc0QhvCXGzkDi04i_bGCfvKslW98'
-    bot_chatID = '-1001340592635'
-    send_text = 'https://api.telegram.org/bot{}/sendMessage?chat_id={}&parse_mode=Markdown&text={}'.format(bot_token, bot_chatID, bot_message)
+def telegram_bot_sendtext(message):
+    from telegram_bot_secrets import token, chatID
+    send_text = 'https://api.telegram.org/bot{}/sendMessage?chat_id={}&parse_mode=Markdown&text={}'.format(token, chatID, message)
 
     response = requests.get(send_text)
 
@@ -375,6 +374,7 @@ def handle_store(event):
     
     # Check if study is directed to xnat
     biobanca = ipaddress.ip_address(callingIP) in ipaddress.ip_network('192.168.113.0/24') or callingIP == '192.168.179.192' # VPNSSL network o IP di Giusy
+    biobanca = False
     APP_LOGGER.info('biobanca? {}'.format(biobanca))
 
     try:
