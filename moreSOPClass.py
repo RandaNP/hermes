@@ -74,5 +74,11 @@ _more_sop_class = {
     'PrivateSiemensAXFrameSetsStorage' : '1.3.12.2.1107.5.99.3.11',
     'PrivateSiemensCSANonImageStorage' : '1.3.12.2.1107.5.9.1',
     'PrivateSiemensCTMRVolumeStorage' : '1.3.12.2.1107.5.99.3.10',
-    'PrivateTomTecAnnotationStorage' : '1.2.276.0.48.5.1.4.1.1.7'
+    'PrivateTomTecAnnotationStorage' : '1.2.276.0.48.5.1.4.1.1.7',
+    'PlannedImagingAgentAdministrationSRStorage' : '1.2.840.10008.5.1.4.1.1.88.74',  # A.35.19
+    'PerformedImagingAgestAdministrationSRStorage' : '1.2.840.10008.5.1.4.1.1.88.75',  # A.35.20
+    'RTPhysicianIntentStorage' : '1.2.840.10008.5.1.4.1.1.481.10',  # A.86.1.2
+    'RTSegmentAnnotationStorage' : '1.2.840.10008.5.1.4.1.1.481.11',  # A.86.1.3
+    'RTRadiationSetStorage' : '1.2.840.10008.5.1.4.1.1.481.12',  # A.86.1.4
+    'CArmPhotonElectronRadiationStorage' : '1.2.840.10008.5.1.4.1.1.481.13',  # A.86.1.5
 }

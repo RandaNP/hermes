@@ -29,7 +29,7 @@ from pydicom.uid import (
 
 from pynetdicom import (
     AE, evt,
-    AllStoragePresentationContexts,
+    StoragePresentationContexts,
     VerificationPresentationContexts,
     PYNETDICOM_IMPLEMENTATION_UID,
     PYNETDICOM_IMPLEMENTATION_VERSION
@@ -43,7 +43,7 @@ MoreStoragePresentationContexts = [
    build_context(uid) for uid in sorted(_more_sop_class.values())
 ]
 
-StoragePresentationContexts = AllStoragePresentationContexts + MoreStoragePresentationContexts
+StoragePresentationContexts = StoragePresentationContexts + MoreStoragePresentationContexts
 
 # App-specific includes
 import common.config as config
