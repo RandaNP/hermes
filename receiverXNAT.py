@@ -733,25 +733,42 @@ def handle_store(event):
         # We use `write_like_original=False` to ensure that a compliant
         #   File Meta Information Header is written
         ds.save_as(filename, write_like_original=False)
+  
+        # In caso non andasse a buon file la creazione del dcm (ds.save_as) la seguente istruzione (subprocess)
+        # non dovrebbe eseguirla e quindi non generare il file .tags
+        subgetdcm = subprocess.check_output(['/home/hermes/hermes/bin/getdcmtags', filename, '0.0.0.0:8080'])
+  
         status_ds.Status = 0x0000 # Success
+    
     except IOError:
         APP_LOGGER.error('Could not write file to specified directory:')
         APP_LOGGER.error("    {0!s}".format(os.path.dirname(filename)))
         APP_LOGGER.error('Directory may not exist or you may not have write '
                      'permission')
+
         # Failed - Out of Resources - IOError
         status_ds.Status = 0xA700
+
+    except subprocess.CalledProcessError as err:
+        APP_LOGGER.error('getdcmtags --> {0!s}'.format(err.output))
+        
+        # remove filename dcm.
+        os.remove(filename)
+        
+        status_ds.Status = 0xA701
+
     except:
         APP_LOGGER.error('Could not write file to specified directory:')
         APP_LOGGER.error("    {0!s}".format(os.path.dirname(filename)))
         # Failed - Out of Resources - Miscellaneous error
         status_ds.Status = 0xA701
 
+    '''
     try:
         subgetdcm = subprocess.check_output(['/home/hermes/hermes/bin/getdcmtags', filename, '0.0.0.0:8080'])
     except subprocess.CalledProcessError as err:
         APP_LOGGER.error('getdcmtags --> {0!s}'.format(err.output))
-    
+    '''
     APP_LOGGER.info("handle_store END")    
     return status_ds
 
