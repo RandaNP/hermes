@@ -29,11 +29,21 @@ from pydicom.uid import (
 
 from pynetdicom import (
     AE, evt,
-    StoragePresentationContexts,
+    AllStoragePresentationContexts,
     VerificationPresentationContexts,
     PYNETDICOM_IMPLEMENTATION_UID,
     PYNETDICOM_IMPLEMENTATION_VERSION
 )
+
+#add SOP Classes as DICOM Conformance Statement dcm4che Archive 5
+from moreSOPClass import _more_sop_class
+from pynetdicom import build_context
+
+MoreStoragePresentationContexts = [
+   build_context(uid) for uid in sorted(_more_sop_class.values())
+]
+
+StoragePresentationContexts = AllStoragePresentationContexts + MoreStoragePresentationContexts
 
 # App-specific includes
 import common.config as config
