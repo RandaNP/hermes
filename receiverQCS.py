@@ -35,6 +35,16 @@ from pynetdicom import (
     PYNETDICOM_IMPLEMENTATION_VERSION
 )
 
+#add SOP Classes as DICOM Conformance Statement dcm4che Archive 5
+from moreSOPClass import _more_sop_class
+from pynetdicom import build_context
+
+MoreStoragePresentationContexts = [
+   build_context(uid) for uid in sorted(_more_sop_class.values())
+]
+
+StoragePresentationContexts = StoragePresentationContexts + MoreStoragePresentationContexts
+
 # App-specific includes
 import common.config as config
 
@@ -214,9 +224,10 @@ APP_LOGGER.debug('$storescp.py v{0!s}'.format(VERSION))
 APP_LOGGER.debug('')
 
 # Telegram BOT Alert
-def telegram_bot_sendtext(message):
-    from telegram_bot_secrets import token, chatID
-    send_text = 'https://api.telegram.org/bot{}/sendMessage?chat_id={}&parse_mode=Markdown&text={}'.format(token, chatID, message)
+def telegram_bot_sendtext(bot_message):
+    bot_token = '1397633971:AAGLUuCmc0QhvCXGzkDi04i_bGCfvKslW98'
+    bot_chatID = '-1001340592635'
+    send_text = 'https://api.telegram.org/bot{}/sendMessage?chat_id={}&parse_mode=Markdown&text={}'.format(bot_token, bot_chatID, bot_message)
 
     response = requests.get(send_text)
 
@@ -688,6 +699,7 @@ def handle_store(event):
         # prepare deidentification information
         deidMethSeq = []
         for option in ['113100', '113107', '113108', '113109', '113110']: # questa lista potrebbe essere definita nel template e rappresenta le opzioni di deidentificazione usate dal template
+            
             deidMethEl = Dataset()
             deidMethEl.CodeValue = option
             deidMethEl.CodingSchemeDesignator = 'DCM'
@@ -732,26 +744,43 @@ def handle_store(event):
         # We use `write_like_original=False` to ensure that a compliant
         #   File Meta Information Header is written
         ds.save_as(filename, write_like_original=False)
+  
+        # In caso non andasse a buon file la creazione del dcm (ds.save_as) la seguente istruzione (subprocess)
+        # non dovrebbe eseguirla e quindi non generare il file .tags
+        subgetdcm = subprocess.check_output(['/home/hermes/hermes/bin/getdcmtags', filename, '0.0.0.0:8080'])
+  
         status_ds.Status = 0x0000 # Success
+    
     except IOError:
         APP_LOGGER.error('Could not write file to specified directory:')
         APP_LOGGER.error("    {0!s}".format(os.path.dirname(filename)))
         APP_LOGGER.error('Directory may not exist or you may not have write '
                      'permission')
+
         # Failed - Out of Resources - IOError
         status_ds.Status = 0xA700
+
+    except subprocess.CalledProcessError as err:
+        APP_LOGGER.error('getdcmtags --> {0!s}'.format(err.output))
+        
+        # remove filename dcm.
+        os.remove(filename)
+        
+        status_ds.Status = 0xA701
+
     except:
         APP_LOGGER.error('Could not write file to specified directory:')
         APP_LOGGER.error("    {0!s}".format(os.path.dirname(filename)))
         # Failed - Out of Resources - Miscellaneous error
         status_ds.Status = 0xA701
 
+    '''
     try:
         subgetdcm = subprocess.check_output(['/home/hermes/hermes/bin/getdcmtags', filename, '0.0.0.0:8080'])
     except subprocess.CalledProcessError as err:
         APP_LOGGER.error('getdcmtags --> {0!s}'.format(err.output))
-    
-    APP_LOGGER.info("handle_store END")
+    '''
+    APP_LOGGER.info("handle_store END")    
     return status_ds
 
 handlers = [(evt.EVT_C_STORE, handle_store)]
