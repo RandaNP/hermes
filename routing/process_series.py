@@ -4,6 +4,7 @@ import uuid
 import json
 import shutil
 import daiquiri
+import glob
 
 # App-specific includes
 import common.config as config
@@ -201,7 +202,8 @@ def push_series_outgoing(fileList,series_UID,transfer_targets):
         if current_target==total_targets:
             move_operation=True
 
-        folder_name=config.hermes['outgoing_folder'] + '/' + str(uuid.uuid1())
+        uuidFolder = uuid.uuid1()
+        folder_name=config.hermes['outgoing_folder'] + '/' + str(uuidFolder)
         target_folder=folder_name+"/"
 
         try:
@@ -250,7 +252,8 @@ def push_series_outgoing(fileList,series_UID,transfer_targets):
             operation=shutil.move
         else:
             operation=shutil.copy
-
+       
+        '''
         for entry in fileList:
             try:
                 operation(source_folder+entry+'.dcm', target_folder+entry+'.dcm')
@@ -260,8 +263,108 @@ def push_series_outgoing(fileList,series_UID,transfer_targets):
                 logger.exception(f'Source folder {source_folder}')
                 logger.exception(f'Target folder {target_folder}')
                 monitor.send_event(monitor.h_events.PROCESSING, monitor.severity.ERROR, f'Problem while pushing file to outgoing {entry}')
+        '''
+        
+        # Update
+        logger.info("Pushing outgoing series {} ({}) .tags".format( series_UID, len(fileList) ) )
+        logger.debug("fileList = {}".format(fileList))
+        seriesFail  = False
+        pushTags = 0
+        pushDcm = 0
+        pushErr = 0
+        fileType  = [".dcm" , ".tags"]
+        
+        # NOTA!. se NON è presente il .tags (mentre il .dcm si) il router non considera quella instanza,
+        # infatti nella fileList non mette quella istanza (il dcm rimane in incoming). Ma in questo
+        # punto non avendolo nella fileList è come non esistesse.
 
-        monitor.send_series_event(monitor.s_events.MOVE, series_UID, len(fileList), folder_name, "")
+        for entry in fileList:
+   
+            for item in fileType:
+
+                entryFail = False
+
+                src_in  = source_folder + entry + item
+                dst_ou  = target_folder + entry + item
+                dst_er  = config.hermes['error_folder'] + '/' + str(uuidFolder) + "/" + entry + item
+
+                try:
+                    
+                    # **** Test purpose only *****
+                    # raise Exception("Sorry, test pushing to error")
+                    # ----------------------------
+                    
+                    operation ( src_in, dst_ou ) 
+                    
+                    logger.debug("Pushed {} TO {} instace...".format(src_in, dst_ou) )
+                    logger.debug ("Pushed {} TO {} ".format(item, target_folder) )
+                
+                    if item == ".dcm" :
+                        pushDcm = pushDcm + 1
+                    else: 
+                        pushTags = pushTags + 1 
+
+                except Exception:
+                    
+                    seriesFail  = True
+                    entryFail   = True
+
+                if entryFail is True:
+
+                    log = "Error to pushing file {} TO {}. is Present?'".format(src_in, dst_ou)
+                    logger.error(f'{log}')
+                    monitor.send_event(monitor.h_events.PROCESSING, monitor.severity.ERROR, f'{log}')
+
+                    if  not os.path.exists( config.hermes['error_folder'] + '/' + str(uuidFolder) ):
+                            os.mkdir(config.hermes['error_folder'] + '/' + str(uuidFolder))    
+                            logger.info( "Created " + config.hermes['error_folder'] + '/' + str(uuidFolder) )
+                    try:
+                        operation ( src_in, dst_er ) 
+                        pushErr = pushErr + 1
+                        logger.debug ("Pushed {} (.dcm) TO {}  ".format(src_in, dst_er) )
+                            
+                    except: 
+                        logger.error ("Pushed FAIL {} (.dcm) TO {}  ".format(src_in, dst_er) )
+
+        logger.info ("Pushed {} (.dcm)  TO {}".format(pushDcm, target_folder) )            
+        logger.info ("Pushed {} (.tags) TO {}".format(pushTags, target_folder) )
+        
+        # Clean outgoing folder 
+        if seriesFail is True:
+     
+            logger.info("Series Fail!...Cleaning {}".format(target_folder) )
+
+            dcmList  = glob.glob(target_folder + '/*.dcm')
+            tagsList = glob.glob(target_folder + '/*.tags')
+
+            dcmNum = 0
+            for dcmFile in dcmList:
+                try:
+                    os.remove(dcmFile)
+                    logger.debug(" RM .dcm = {} ".format(dcmFile) ) 
+                    dcmNum = dcmNum + 1
+                except:
+                    logger.debug(" RM .dcm = {} FAIL !".format(dcmFile) )
+
+            tagsNum = 0
+            for tagsFile in tagsList:
+                try:
+                    os.remove(tagsFile)
+                    logger.debug(" RM .tags = {} ".format(tagsFile) ) 
+                    tagsNum = tagsNum + 1
+                except:
+                    logger.debug(" RM .tags = {} FAIL !".format(tagsFile) )
+
+            os.remove(target_folder+"/target.json")     
+
+            logger.info ("Removed {} (.dcm)  FROM {} ".format(dcmNum, target_folder) )            
+            logger.info ("Removed {} (.tags) FROM {} ".format(tagsNum, target_folder) )    
+
+        else:
+            
+            logger.info("Series Pushed completely! ")  
+            monitor.send_series_event(monitor.s_events.MOVE, series_UID, len(fileList), folder_name, "")
+
 
         try:
             lock.free()
@@ -271,6 +374,19 @@ def push_series_outgoing(fileList,series_UID,transfer_targets):
             monitor.send_event(monitor.h_events.PROCESSING, monitor.severity.ERROR, f'Unable to remove lock file {lock_file}')
             return
 
+        # *** SERIE FALLITA ***
+        if seriesFail is True: 
+            
+            # la cartella error (creata) non la tocco!
+            try:
+                shutil.rmtree( target_folder )  
+                logger.info("RM folder = {} ".format(target_folder) ) 
+
+            except Exception:  
+               logger.info("RM folder = {} FAIL !".format(target_folder) )
+
+            logger.info ("Pushed {} (files) TO {}".format(pushErr, config.hermes['error_folder'] + '/' + str(uuidFolder)) ) 
+  
 
 def process_error_files():
     """
