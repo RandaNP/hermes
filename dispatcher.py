@@ -79,7 +79,7 @@ def dispatch(args):
                 and not has_been_send(entry.path)
                 and is_ready_for_sending(entry.path)
             ):
-                logger.info(f"Sending folder {entry.path}")
+                logger.info(f"Check if reading for {entry.path}")
                 execute(Path(entry.path), success_folder, error_folder, retry_max, retry_delay)
 
             # If termination is requested, stop processing series after the
