@@ -429,10 +429,16 @@ def handle_store(event):
             str(hex(int(studyDate[6:8])))[2:]
         ])
     
-        # add PatientComment tag
+        # add Patient & Study Comment tags
         ds.add_new('PatientComments', 'CS', 'Project:{} Session:{}'.format(accessionNumber, '_'.join([accessionNumber, patientName, modality, studyDateHex])))
+        ds.add_new('StudyComments', 'CS', '')
 
     else:
+        
+        # add Patient & Study Comment tags
+        ds.add_new('PatientComments', 'CS', '')
+        ds.add_new('StudyComments', 'CS', '')
+
         # Check callingAETitle
         callingAEList = {
             'AET-TEST': 'SDN-test',
