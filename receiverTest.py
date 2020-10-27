@@ -699,7 +699,7 @@ def handle_store(event):
         APP_LOGGER.debug('tag privati rimossi')
         APP_LOGGER.debug('deidExam: {}'.format(deidExam))
         
-        ''' # ricordarsi di rimuovere la forzatura sotto
+        '''
         resp = requests.post(
             api_deid_path +'/v1/deid',
             json = {
@@ -710,8 +710,6 @@ def handle_store(event):
             },
             headers = {'Content-type': 'application/json'}
         ).json()
-        
-        resp['success'] = False # poichè abbiamo disattivato la request per la de-id
 
         if resp['success']:
             APP_LOGGER.info('StudyInstanceUID = {}-> DEID SUCCESS!'.format( ds.StudyInstanceUID ) )
@@ -723,6 +721,7 @@ def handle_store(event):
             APP_LOGGER.info('StudyInstanceUID = {} -> DEID FAIL!'.format( ds.StudyInstanceUID ) )
             return status_ds
         '''
+
         # Deid temp workaround
         # prepare deidentification information
         deidMethSeq = []
@@ -754,7 +753,7 @@ def handle_store(event):
                     exec('tagfunctions.'+tags[tag][1]+'(tag, ds)')
             except:
                 pass
-                    
+
         # insert de-identification information
         ds.PatientIdentifiedRemoved = 'YES'
         ds.DeidentificationMethod = '{Per DICOM PS 3.15 AnnexE. Details in 0012,0064}'
@@ -767,31 +766,48 @@ def handle_store(event):
         del ds[0x001310fe] # bcuInstitutionId
         del ds[0x001310fd] # patient.bcuPatientID
         #####
- 
+   
     try:
         # We use `write_like_original=False` to ensure that a compliant
         #   File Meta Information Header is written
         ds.save_as(filename, write_like_original=False)
+  
+        # In caso non andasse a buon file la creazione del dcm (ds.save_as) la seguente istruzione (subprocess)
+        # non dovrebbe eseguirla e quindi non generare il file .tags
+        subgetdcm = subprocess.check_output(['/home/hermes/hermes/bin/getdcmtags', filename, '0.0.0.0:8080'])
+  
         status_ds.Status = 0x0000 # Success
+    
     except IOError:
         APP_LOGGER.error('Could not write file to specified directory:')
         APP_LOGGER.error("    {0!s}".format(os.path.dirname(filename)))
         APP_LOGGER.error('Directory may not exist or you may not have write '
                      'permission')
+
         # Failed - Out of Resources - IOError
         status_ds.Status = 0xA700
+
+    except subprocess.CalledProcessError as err:
+        APP_LOGGER.error('getdcmtags --> {0!s}'.format(err.output))
+        
+        # remove filename dcm.
+        os.remove(filename)
+        
+        status_ds.Status = 0xA701
+
     except:
         APP_LOGGER.error('Could not write file to specified directory:')
         APP_LOGGER.error("    {0!s}".format(os.path.dirname(filename)))
         # Failed - Out of Resources - Miscellaneous error
         status_ds.Status = 0xA701
 
+    '''
     try:
         subgetdcm = subprocess.check_output(['/home/hermes/hermes/bin/getdcmtags', filename, '0.0.0.0:8080'])
     except subprocess.CalledProcessError as err:
         APP_LOGGER.error('getdcmtags --> {0!s}'.format(err.output))
-    
-    APP_LOGGER.info("handle_store END")
+    '''
+    APP_LOGGER.info("handle_store END")    
     return status_ds
 
 handlers = [(evt.EVT_C_STORE, handle_store)]
