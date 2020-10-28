@@ -15,7 +15,9 @@ from datetime import datetime
 import string
 import ipaddress
 from pathlib import Path
-from qTcApi import qtcApiLogin, qtcApiLogout, qtcApiExaminationCreate, qtcApiExaminationList
+#from qTcApi import qtcApiLogin, qtcApiLogout, qtcApiExaminationCreate, qtcApiExaminationList, qtcApiExamSearch
+from qtc.api2 import *
+from qtc.core import *
 
 
 from pydicom.dataset import Dataset
@@ -224,10 +226,12 @@ APP_LOGGER.debug('$storescp.py v{0!s}'.format(VERSION))
 APP_LOGGER.debug('')
 
 # Telegram BOT Alert
-def telegram_bot_sendtext(bot_message):
-    bot_token = '1397633971:AAGLUuCmc0QhvCXGzkDi04i_bGCfvKslW98'
-    bot_chatID = '-1001340592635'
-    send_text = 'https://api.telegram.org/bot{}/sendMessage?chat_id={}&parse_mode=Markdown&text={}'.format(bot_token, bot_chatID, bot_message)
+def telegram_bot_sendtext(message, APP_LOGGER):
+    #from telegram_bot_secrets import token, chatID
+    token = '1397633971:AAGLUuCmc0QhvCXGzkDi04i_bGCfvKslW98'
+    chatID = '-1001340592635'
+    APP_LOGGER.info(token)
+    send_text = 'https://api.telegram.org/bot{}/sendMessage?chat_id={}&parse_mode=Markdown&text={}'.format(token, chatID, message)
 
     response = requests.get(send_text)
 
@@ -501,17 +505,17 @@ def handle_store(event):
     
             respLenData = len (resp['data'])
 
+            # Questa parte è da togliere, mi serve solo per generare
+            # un paziente con un nome diverso per il testing!.
+            currentDateTime = datetime.now()
+            pN = "PAZIENTE_"+str(currentDateTime.strftime(("%H%M%S")))+str("^^^")
+
+            APP_LOGGER.debug("pN = "+pN)
+
             if resp['data'] == []: # Nessun StudyInstaceUID Trovato!
     
                 APP_LOGGER.info("StudyInstanceUID = " + ds.StudyInstanceUID + " -> NOT FOUND in DEID-DB")
-    
-                # Questa parte è da togliere, mi serve solo per generare
-                # un paziente con un nome diverso per il testing!.
-                currentDateTime = datetime.now()
-                pN = "PAZIENTE_"+str(currentDateTime.strftime(("%H%M%S")))+str("^^^")
-    
-                APP_LOGGER.debug("pN = "+pN)
-    
+       
                 chars = re.escape(string.punctuation)
                 # Institution Name
                 institutionName = ds.get("InstitutionName", '').upper()
@@ -568,8 +572,7 @@ def handle_store(event):
     
                 if not biobanca:
                     
-                    APP_LOGGER.debug("Preparing qtcExam....")
-                    
+                    '''
                     pN = deidExam['patient']['patientName'] + str(currentDateTime.strftime(("%H%M%S")))
     
                     qtcExam = {  
@@ -601,25 +604,25 @@ def handle_store(event):
                             #"anamnesis"             :"Anamnesi" # DA INSERIRE DAL MEDICO INVIANTE SU INTERFACCIA
                         }
                     }
+                    '''                   
 
                     # Caso in cui ci sia il tag ma è vuoto -> Default = M!
-                    if qtcExam["patient_data"]["gender"] == "":
-                       qtcExam["patient_data"]["gender"] = "M"
+                    #if qtcExam["patient_data"]["gender"] == "":
+                    #   qtcExam["patient_data"]["gender"] = "M"
 
-                    APP_LOGGER.debug("qtcExam = " + str(qtcExam))
-       
-                    qtcCreate = qtcApiExaminationCreate(qtcLogin,qtcExam,APP_LOGGER)
-        
-                    if qtcCreate['code'] == 300 and qtcCreate['message'] == "Examination correctly created!":
-                        #APP_LOGGER.info("Esame creato correttamente su qTC")
-                        APP_LOGGER.info("StudyInstanceUID = " + ds.StudyInstanceUID + " -> CREATED in qTC")
-                    else:
-                        #APP_LOGGER.error('Unable to create qtcExam: {} - {} - {}'.format(callingIP, callingAETitle, ds.StudyInstanceUID))
-                        APP_LOGGER.info("StudyInstanceUID = " + ds.StudyInstanceUID + " -> UNABLE to CREATE in qTC")
+                    # Build Exam for qTC (from deid) 
+                    qtcBuild = qtcExamBuild ("XXX",deidExam,qtcClinicOid,ds,APP_LOGGER)
+
+                    # Create Exam on qTC
+                    qtcCreate = qtcExamCreate (qtcLogin,qtcBuild,ds,APP_LOGGER) 
+                    
+                    # Logout from qTC
+                    qtcApiLogout (qtcLogin,APP_LOGGER)
+
+                    if qtcCreate is False:
+                        APP_LOGGER.error("Return 0xA700")
                         return 0xA700
     
-                    qtcLogout   = qtcApiLogout(qtcLogin,APP_LOGGER)
-      
             elif respLenData == 1: # Unico StudyInstaceUID Trovato!
                 
                 APP_LOGGER.debug("len ( resp['data'] ) = " + str(respLenData) )
@@ -645,12 +648,27 @@ def handle_store(event):
                     APP_LOGGER.debug("Resp Api: Update Exam {}".format(resp))
 
                     APP_LOGGER.info('StudyInstanceUID = {} (id = {}) -> UPDATED!'.format( ds.StudyInstanceUID, deidExam['id'] ) )
-    
+                    
+                    # qTC Check: Se l'esame su qTC non è presente allora viene ricreato!                
+                    if qtcExamExist (qtcLogin, ds.StudyInstanceUID, APP_LOGGER) is False:
+
+                        # Build Exam for qTC (from deid) 
+                        qtcBuild = qtcExamBuild ("XXX",deidExam,qtcClinicOid,ds,APP_LOGGER)
+
+                        # Create Exam on qTC
+                        qtcCreate = qtcExamCreate (qtcLogin,qtcBuild,ds,APP_LOGGER) 
+                    
+                        # Logout from qTC
+                        qtcApiLogout (qtcLogin,APP_LOGGER)
+
+                        if qtcCreate is False:
+                            APP_LOGGER.error("Return 0xA700")
+                            return 0xA700                         
                 else:
                     
                     APP_LOGGER.info('StudyInstanceUID = {} (id = {}) -> NO UPDATE'.format( ds.StudyInstanceUID, deidExam['id'] ) )
     
-            else:
+            else: # Multipli StudyInstaceUID Trovati!
                 
                 APP_LOGGER.error("StudyInstanceUID =" + ds.StudyInstanceUID + " -> MULTIPLE STUDY INSTANCE FOUND!.")
                 # TO-DO: aggiungere notifica mail
