@@ -19,7 +19,6 @@ from pathlib import Path
 from qtc.api2 import *
 from qtc.core import *
 
-
 from pydicom.dataset import Dataset
 from pydicom.uid import (
     ExplicitVRLittleEndian,
@@ -250,9 +249,12 @@ if isinstance(args.port, int):
         sys.exit()
 
 if args.port == 11112:
+    StationAETitle_XNAT = "XNAT_TEST"
     api_deid_path = "http://192.168.179.229:5001"
 else:
+    StationAETitle_XNAT = "XNAT"
     api_deid_path = "http://192.168.179.229:5000"
+
 
 
 # Set Transfer Syntax options
@@ -386,10 +388,12 @@ def handle_store(event):
     APP_LOGGER.info('Calling IP: {0!s}'.format(callingIP))
     callingAETitle = str(event.assoc.requestor.info['ae_title'], encoding='ascii').strip()
     APP_LOGGER.info('Calling AE Title: {0!s}'.format(callingAETitle))
-    
-    # Check if study is directed to xnat
-    biobanca = ipaddress.ip_address(callingIP) in ipaddress.ip_network('192.168.113.0/24') or callingIP == '192.168.179.192' # VPNSSL network o IP di Giusy
-    APP_LOGGER.info('biobanca? {}'.format(biobanca))
+
+    # Check if study comes from LAN
+    LAN = (ipaddress.ip_address(callingIP) in ipaddress.ip_network('192.168.179.0/24')) or (ipaddress.ip_address(callingIP) in ipaddress.ip_network('192.168.1.0/24'))
+
+
+    APP_LOGGER.info('LAN? {}'.format(LAN))
 
     try:
         config.read_config()
@@ -404,89 +408,27 @@ def handle_store(event):
         '_'.join([str(assocId), str(ds.StudyInstanceUID)])
     ]))
 
-    if biobanca:
-        APP_LOGGER.info('Filter XNAT recognizable DICOM modalities')
-        modality = str(ds.get('Modality', ''))
-        if modality not in ['CR', 'CT', 'MR', 'PT', 'US']:
-            APP_LOGGER.warning('Rejected modality {} in {}'.format(modality, str(ds.SeriesInstanceUID)))
-            return 0x0000
-        APP_LOGGER.info('Insert tag StationAETitle = XNAT')
-        ds.add_new(0x00080055, 'AE', 'XNAT')
-        patientName = str(ds.get('PatientName', ''))
-        if patientName.startswith('MOLIM_ONCO_'):
-            patientName = patientName[11:]
-        callingAETitle = patientName.split('_', 1)[0]
-        APP_LOGGER.info('callingAETitle corrected: {}'.format(callingAETitle))
-        accessionNumber = str(ds.get('AccessionNumber', ''))
-        studyDate = str(ds.StudyDate)
-        studyDateHex = ''.join([
-            str(hex(int(studyDate[0:4]) - 1950))[2:],
-            str(hex(int(studyDate[4:6])))[2:],
-            str(hex(int(studyDate[6:8])))[2:]
-        ])
-    
-        # add Patient & Study Comment tags
-        ds.add_new('PatientComments', 'CS', 'Project:{} Session:{}'.format(accessionNumber, '_'.join([accessionNumber, patientName, modality, studyDateHex])))
-        ds.add_new('StudyComments', 'CS', '')
-    
-    else:
-        
-        # add Patient & Study Comment tags
-        ds.add_new('PatientComments', 'CS', '')
-        ds.add_new('StudyComments', 'CS', '')
+    APP_LOGGER.info('Filter XNAT recognizable DICOM modalities')
+    modality = str(ds.get('Modality', ''))
+    if modality not in ['CR', 'CT', 'MR', 'PT', 'US']:
+        APP_LOGGER.warning('Rejected modality {} in {}'.format(modality, str(ds.SeriesInstanceUID)))
+        return 0x0000
+    APP_LOGGER.info('Insert tag StationAETitle = {}'.format(StationAETitle_XNAT))
+    ds.add_new(0x00080055, 'AE', StationAETitle_XNAT)
 
-        # Check callingAETitle
-        callingAEList = {
-            'AET-TEST': 'SDN-test',
-            'SYVIA131234': 'SDN',
-        }
-        try:
-            callingAETitle = callingAEList[callingAETitle]
+    patientName = str(ds.get('PatientName', ''))
+    if patientName.startswith('MOLIM_ONCO_'):
+        patientName = patientName[11:]
+    callingAETitle = patientName.split('_', 1)[0]
+    APP_LOGGER.info('callingAETitle corrected: {}'.format(callingAETitle))
+    accessionNumber = str(ds.get('AccessionNumber', ''))
+    studyDate = str(ds.StudyDate)
+    studyDateHex = ''.join([
+        str(hex(int(studyDate[0:4]) - 1950))[2:],
+        str(hex(int(studyDate[4:6])))[2:],
+        str(hex(int(studyDate[6:8])))[2:]
+    ])
 
-            if not studyProcessed.exists():
-                qtcLogin = qtcApiLogin('biocheckup1', 'biocheckup1', APP_LOGGER)
-
-                qtcClinic = requests.post(
-                    'https://192.168.179.230:5000/clinic/search', 
-                    json = {'institution_name_DICOM': callingAETitle}, 
-                    headers = {
-                        'Content-type': 'application/json',
-                        'Authorization': 'Bearer '+ qtcLogin.json()['token']
-                    },
-                    verify = False,
-                    cookies = qtcLogin.cookies
-                )
-                qtcClinic = json.loads(qtcClinic.text)
-
-                if qtcClinic['code'] == 200:
-                    qtcClinicOid = qtcClinic['data'][0]['_id']['$oid']
-                    APP_LOGGER.info("qtcClinic ($oid) = " + qtcClinicOid)
-                elif qtcClinic['code'] == 201:
-                    raise LookupError
-
-        except (KeyError, LookupError) as e:
-            APP_LOGGER.warning("AETitle -{}- not in list!".format(callingAETitle))
-            AETitleNotInListNotify = Path('/'.join([
-                config.hermes['error_folder'],
-                '_'.join([callingIP, callingAETitle, 'notInList']),
-            ]))
-            if not AETitleNotInListNotify.exists():
-                if type(e) == KeyError:
-                    subject = 'Hermes - AET not in list: {} - {}'
-                else:
-                    subject = 'Hermes - Clinic not in qTC: {} - {}'
-
-                try:
-                    telegram_bot_sendtext(subject.format(callingAETitle, callingIP))
-                    AETitleNotInListNotify.touch()
-                except Exception as e1:
-                    APP_LOGGER.ERROR(e1.message)
-            # Not Authorized
-            status_ds.Status = 0x0124
-            status_ds.ErrorComment = 'Not Authorized'
-            return status_ds
-        APP_LOGGER.info('Insert tag StationAETitle = QCS')
-        ds.add_new(0x00080055, 'AE', 'QCS')
 
     if not studyProcessed.exists():
         
@@ -505,12 +447,7 @@ def handle_store(event):
     
             respLenData = len (resp['data'])
 
-            # Questa parte è da togliere, mi serve solo per generare
-            # un paziente con un nome diverso per il testing!.
-            currentDateTime = datetime.now()
-            pN = "PAZIENTE_"+str(currentDateTime.strftime(("%H%M%S")))+str("^^^")
 
-            APP_LOGGER.debug("pN = "+pN)
 
             if resp['data'] == []: # Nessun StudyInstaceUID Trovato!
     
@@ -541,11 +478,10 @@ def handle_store(event):
                     
                     'studyInstanceUID'      : str(ds.StudyInstanceUID),
                     'assocId'               : assocId,
+                    'status'                : 'DEIDENTIFICATO',
                 }
-                if biobanca:
-                    deidExam['status'] = 'DEIDENTIFICATO'
-                else:
-                    deidExam['status'] = 'NUOVO'
+                if LAN:
+                    deidExam['callingAETitle'] = 'BCU'
     
                 APP_LOGGER.debug("Call Api: Create Exam")
                 
@@ -569,60 +505,6 @@ def handle_store(event):
                     APP_LOGGER.error("StudyInstanceUID = " + ds.StudyInstanceUID + " -> UNABLE to CREATE in DEID-DB")
                     return 0xA700
     
-    
-                if not biobanca:
-                    
-                    '''
-                    pN = deidExam['patient']['patientName'] + str(currentDateTime.strftime(("%H%M%S")))
-    
-                    qtcExam = {  
-            
-                        "patient_data": {
-    
-                            "first_name"    : "XXX", 
-                            "last_name"     : "XXX", 
-                            "birthdate"     : deidExam['patient']['patientBirthDate'],
-                            "birthplace"    : "XXX", # Comune di nascita - non presente in DICOM 
-                            "gender"        : ds.get("PatientSex","M"),
-                            "phone_number"  : "XXX" 
-                        },
-    
-                        "examination_data": {   
-    
-                            "date_creation"         : currentDateTime.strftime('%Y-%m-%d %H:%M:%S'),
-                            "date_upload"           : currentDateTime.strftime('%Y-%m-%d %H:%M:%S'), 
-                            "clinical_date"         : '-'.join([deidExam['studyDate'][0:4],
-                                                                deidExam['studyDate'][4:6],
-                                                                deidExam['studyDate'][6:8]]) + " 00:00:00",
-                            "clinic_fkid"           : qtcClinicOid,
-                            "clinical_code"         : [""], # DA INSERIRE DAL MEDICO INVIANTE SU INTERFACCIA
-                            "patient_id_DICOM"      : deidExam['patient']['bcuPatientID'],
-                            "clinical_question"     : deidExam['studyInstanceUID'],
-                            #"diagnostic_question"   :"Referto", # DA INSERIRE DAL MEDICO INVIANTE SU INTERFACCIA
-                            "modality"              : ds.get("Modality", ''),
-                            "service_type"          :"PRIVATO",
-                            #"anamnesis"             :"Anamnesi" # DA INSERIRE DAL MEDICO INVIANTE SU INTERFACCIA
-                        }
-                    }
-                    '''                   
-
-                    # Caso in cui ci sia il tag ma è vuoto -> Default = M!
-                    #if qtcExam["patient_data"]["gender"] == "":
-                    #   qtcExam["patient_data"]["gender"] = "M"
-
-                    # Build Exam for qTC (from deid) 
-                    qtcBuild = qtcExamBuild ("XXX",deidExam,qtcClinicOid,ds,APP_LOGGER)
-
-                    # Create Exam on qTC
-                    qtcCreate = qtcExamCreate (qtcLogin,qtcBuild,ds,APP_LOGGER) 
-                    
-                    # Logout from qTC
-                    qtcApiLogout (qtcLogin,APP_LOGGER)
-
-                    if qtcCreate is False:
-                        APP_LOGGER.error("Return 0xA700")
-                        return 0xA700
-    
             elif respLenData == 1: # Unico StudyInstaceUID Trovato!
                 
                 APP_LOGGER.debug("len ( resp['data'] ) = " + str(respLenData) )
@@ -633,46 +515,15 @@ def handle_store(event):
 
                 APP_LOGGER.debug("deidExam = " + str(deidExam))
                 
-                if not biobanca and (deidExam['associationId'] is None or (str(deidExam['associationId'])) != assocId):
-                    # API per aggiornamento dello stato e associantionId dell'esame
-                    url = api_deid_path + "/v1/exams/" + str(deidExam['id'])
-                     
-                    APP_LOGGER.debug("Call Api: Update Exam {}".format(url))
-    
-                    resp = requests.patch(
-                        api_deid_path + '/v1/exams/' + str(deidExam['id']),
-                        json = {'status':'NUOVO', 'associationId': assocId},
-                        headers = {'Content-type': 'application/json'}
-                    ).json()
-    
-                    APP_LOGGER.debug("Resp Api: Update Exam {}".format(resp))
-
-                    APP_LOGGER.info('StudyInstanceUID = {} (id = {}) -> UPDATED!'.format( ds.StudyInstanceUID, deidExam['id'] ) )
-                    
-                    # qTC Check: Se l'esame su qTC non è presente allora viene ricreato!                
-                    if qtcExamExist (qtcLogin, ds.StudyInstanceUID, APP_LOGGER) is False:
-
-                        # Build Exam for qTC (from deid) 
-                        qtcBuild = qtcExamBuild ("XXX",deidExam,qtcClinicOid,ds,APP_LOGGER)
-
-                        # Create Exam on qTC
-                        qtcCreate = qtcExamCreate (qtcLogin,qtcBuild,ds,APP_LOGGER) 
-                    
-                        # Logout from qTC
-                        qtcApiLogout (qtcLogin,APP_LOGGER)
-
-                        if qtcCreate is False:
-                            APP_LOGGER.error("Return 0xA700")
-                            return 0xA700                         
-                else:
-                    
-                    APP_LOGGER.info('StudyInstanceUID = {} (id = {}) -> NO UPDATE'.format( ds.StudyInstanceUID, deidExam['id'] ) )
-    
             else: # Multipli StudyInstaceUID Trovati!
                 
                 APP_LOGGER.error("StudyInstanceUID =" + ds.StudyInstanceUID + " -> MULTIPLE STUDY INSTANCE FOUND!.")
                 # TO-DO: aggiungere notifica mail
     
+        else:
+            APP_LOGGER.error("DEID-API NOT AVAILABLE")
+            return 0xA700
+
         deidExam = {
             'dateInterval': deidExam['patient']['dateInterval'],
             'bcuInstitutionId': deidExam['institution']['bcuInstitutionId'],
@@ -684,84 +535,105 @@ def handle_store(event):
         ]))
         bcuCheckDir.mkdir(exist_ok = True)
         studyProcessed.write_text(json.dumps(deidExam))
-
         
     else: # studyProcessed.exist() == True
         deidExam = json.loads(studyProcessed.read_text())
 
-    if biobanca:
+    if LAN:
+        APP_LOGGER.info('INTERNAL DEID XNAT:')  
+    else:
         APP_LOGGER.info('DEID XNAT:')  
         ds.remove_private_tags()
         APP_LOGGER.debug('tag privati rimossi')
-        APP_LOGGER.debug('deidExam: {}'.format(deidExam))
+
+    APP_LOGGER.debug('deidExam: {}'.format(deidExam))
+    
+    '''
+    resp = requests.post(
+        api_deid_path +'/v1/deid',
+        json = {
+            'dataset': ds,
+            'dateInterval': deidExam['dateInterval'],
+            'bcuInstitutionId': deidExam['bcuInstitutionId'],
+            'bcuPatientID': deidExam['bcuPatientID']
+        },
+        headers = {'Content-type': 'application/json'}
+    ).json()
+
+    if resp['success']:
+        APP_LOGGER.info('StudyInstanceUID = {}-> DEID SUCCESS!'.format( ds.StudyInstanceUID ) )
+        ds.from_json(resp['data'])           
+    
+    else:
+        status_ds.Status = 0x0110
+        status_ds.ErrorComment = 'Internal de-identification error'
+        APP_LOGGER.info('StudyInstanceUID = {} -> DEID FAIL!'.format( ds.StudyInstanceUID ) )
+        return status_ds
+    '''
+
+    # Deid temp workaround
+    # prepare deidentification information
+    deidMethSeq = []
+    for option in ['113100', '113107', '113108', '113109', '113110']: # questa lista potrebbe essere definita nel template e rappresenta le opzioni di deidentificazione usate dal template
         
-        '''
-        resp = requests.post(
-            api_deid_path +'/v1/deid',
-            json = {
-                'dataset': ds,
-                'dateInterval': deidExam['dateInterval'],
-                'bcuInstitutionId': deidExam['bcuInstitutionId'],
-                'bcuPatientID': deidExam['bcuPatientID']
-            },
-            headers = {'Content-type': 'application/json'}
-        ).json()
+        deidMethEl = Dataset()
+        deidMethEl.CodeValue = option
+        deidMethEl.CodingSchemeDesignator = 'DCM'
+        deidMethEl.CodingMeaning = deidMeth[option]
+        deidMethSeq.append(deidMethEl)
 
-        if resp['success']:
-            APP_LOGGER.info('StudyInstanceUID = {}-> DEID SUCCESS!'.format( ds.StudyInstanceUID ) )
-            ds.from_json(resp['data'])           
-        
-        else:
-            status_ds.Status = 0x0110
-            status_ds.ErrorComment = 'Internal de-identification error'
-            APP_LOGGER.info('StudyInstanceUID = {} -> DEID FAIL!'.format( ds.StudyInstanceUID ) )
-            return status_ds
-        '''
+    # BCU Private Block
+    # add BlockOwner tag
+    ds.add_new(0x00130010, 'CS', 'BCU')
+    ds.add_new(0x001310ff, 'IS', deidExam['dateInterval'])
+    ds.add_new(0x001310fe, 'CS', deidExam['bcuInstitutionId'])
+    ds.add_new(0x001310fd, 'CS', deidExam['bcuPatientID'])
 
-        # Deid temp workaround
-        # prepare deidentification information
-        deidMethSeq = []
-        for option in ['113100', '113107', '113108', '113109', '113110']: # questa lista potrebbe essere definita nel template e rappresenta le opzioni di deidentificazione usate dal template
-            
-            deidMethEl = Dataset()
-            deidMethEl.CodeValue = option
-            deidMethEl.CodingSchemeDesignator = 'DCM'
-            deidMethEl.CodingMeaning = deidMeth[option]
-            deidMethSeq.append(deidMethEl)
-
-        # BCU Private Block
-        # add BlockOwner tag
-        ds.add_new(0x00130010, 'CS', 'BCU')
-        ds.add_new(0x001310ff, 'IS', deidExam['dateInterval'])
-        ds.add_new(0x001310fe, 'CS', deidExam['bcuInstitutionId'])
-        ds.add_new(0x001310fd, 'CS', deidExam['bcuPatientID'])
-
+    if not LAN:
         tags["PatientName"]     = ["function", "keeptag"]
         tags["PatientID"]       = ["function", "keeptag"]
         tags["InstitutionName"] = ["function", "keeptag"]
 
-        for tag in tags.keys():
-            try:
-                operation = tags[tag][0]
-                if operation == 'regex':
-                    pass
-                elif operation == 'function':
-                    exec('tagfunctions.'+tags[tag][1]+'(tag, ds)')
-            except:
+    for tag in tags.keys():
+        try:
+            operation = tags[tag][0]
+            if operation == 'regex':
                 pass
+            elif operation == 'function':
+                exec('tagfunctions.'+tags[tag][1]+'(tag, ds)')
+        except:
+            pass
 
-        # insert de-identification information
-        ds.PatientIdentifiedRemoved = 'YES'
-        ds.DeidentificationMethod = '{Per DICOM PS 3.15 AnnexE. Details in 0012,0064}'
-        ds.DeidentificationMethodCodeSequence = deidMethSeq
-        ds.LongitudinalTemporalInformationModified = 'MODIFIED'
+    # insert de-identification information
+    ds.PatientIdentifiedRemoved = 'YES'
+    ds.DeidentificationMethod = '{Per DICOM PS 3.15 AnnexE. Details in 0012,0064}'
+    ds.DeidentificationMethodCodeSequence = deidMethSeq
+    ds.LongitudinalTemporalInformationModified = 'MODIFIED'
 
-        # REMOVE BCU INTERNAL VARS FROM dataset
-        del ds[0x00130010] # Block Owner
-        del ds[0x001310ff] # patient.dateInterval
-        del ds[0x001310fe] # bcuInstitutionId
-        del ds[0x001310fd] # patient.bcuPatientID
-        #####
+    # REMOVE BCU INTERNAL VARS FROM dataset
+    del ds[0x00130010] # Block Owner
+    del ds[0x001310ff] # patient.dateInterval
+    del ds[0x001310fe] # bcuInstitutionId
+    del ds[0x001310fd] # patient.bcuPatientID
+    #####
+
+    if LAN:
+        studyDate = str(ds.StudyDate)
+        studyDateHex = ''.join([
+            str(hex(int(studyDate[0:4]) - 1950))[2:],
+            str(hex(int(studyDate[4:6])))[2:],
+            str(hex(int(studyDate[6:8])))[2:]
+        ])
+
+    # add Patient & Study Comment tags
+    if LAN:
+        project = 'COV19_DB'
+        sessionPrefix = 'COV19'
+        patientName = str(ds.get('PatientName', ''))
+        ds.add_new('PatientComments', 'CS', 'Project:{} Session:{}'.format(project, '_'.join([sessionPrefix, patientName, modality, studyDateHex])))
+    else:
+        ds.add_new('PatientComments', 'CS', 'Project:{} Session:{}'.format(accessionNumber, '_'.join([accessionNumber, patientName, modality, studyDateHex])))
+    ds.add_new('StudyComments', 'CS', '')
    
     try:
         # We use `write_like_original=False` to ensure that a compliant
