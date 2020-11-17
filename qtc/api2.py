@@ -40,6 +40,7 @@ def qtcApiLogin(usr,pwd,APP_LOGGER):
             'cookies':cookies
         }
 
+        APP_LOGGER.info("qtcApiLogin") 
         APP_LOGGER.debug("LOGIN: Token = " + qtcLogin.json()['token'] +"\n" )
         APP_LOGGER.debug("LOGIN: Cookies = " + str(cookies) + "\n" )
 
@@ -171,4 +172,35 @@ def qtcApiExamSearch(qtcLogin,StudyInstanceUID,APP_LOGGER):
         return json.dumps({'success': False, 'message' : err })
 
     
+
+#------------------------------
+# Description:                  
+# -----------------------------
+# @param 
+# @return -
+# -----------------------------
+
+def qtcApiClinicSearch(qtcLogin, qtcClinidId, APP_LOGGER):
+
+    try:
+        qtcClinicSearch = requests.post("https://192.168.179.230:5000/clinic/search", 
+            json = {'institution_name_DICOM': qtcClinidId}, 
+            headers={'Content-type': 'application/json', 'Authorization': 'Bearer ' + qtcLogin.json()['token'] }, 
+            verify=False, cookies = qtcLogin.cookies 
+        )
+
+        qtcClinic=json.loads(qtcClinicSearch.text)
+
+        APP_LOGGER.debug(qtcClinic)
+
+        return json.dumps({'success': True, 'data' : qtcClinic })
+
+    except Exception as err:
+        
+        APP_LOGGER.error(f'Other error occurred: {err}')   
+        
+        return json.dumps({'success': False, 'message' : err })
+
+
+
 
