@@ -76,7 +76,7 @@ deidMeth = {
 }
 ###
 
-PACS_ORIG_ADDRESS = '192.168.179.228'
+PACS_ORIG_ADDRESS = '192.168.179.229'
 VERSION = '0.5.1'
 
 def _setup_argparser():
@@ -432,6 +432,22 @@ def handle_store(event):
         '_'.join([str(assocId), str(callingIP), str(callingAETitle) ,str(ds.StudyInstanceUID)])
     ]))
 
+    if PACS_Orig:
+        
+        studyProcessedPacsOrig = Path('/'.join([
+            config.hermes['success_folder'],
+            'BCU_check',
+            '_'.join([ str(callingAETitle) ,str(ds.StudyInstanceUID)])
+        ]))
+
+        # Prima immagine
+        if studyProcessedPacsOrig.exists():
+            
+            studyProcessedPacsOrig.rename(studyProcessed)
+    
+            APP_LOGGER.info(f"StudyProcessed Rename : {studyProcessed}")
+
+  
     # add Patient & Study Comment tags
     ds.add_new('PatientComments', 'CS', '')
     ds.add_new('StudyComments', 'CS', '')
@@ -440,50 +456,56 @@ def handle_store(event):
 
     if not studyProcessed.exists(): 
        
-        if not PACS_Orig:
+        APP_LOGGER.info("File not exsist. OK")
 
-            try:
-                callingAETitle = callingAEList[callingAETitle]
-               
-                qtcLogin = qtcApiLogin('biocheckup1', 'biocheckup1', APP_LOGGER)
-                qtcClinicOid = qtcClinicExist (qtcLogin, callingAETitle)
-                
-                # For test purpose only!
-                # qtcClinicOid = None 
-                
-                qtcApiLogout (qtcLogin,APP_LOGGER)
+        if PACS_Orig:
 
-                if qtcClinicOid is None:
-                    raise LookupError 
+            # telegram errore non trovo il file
+            APP_LOGGER.error("PACS_Orig File not exsist!!! ")
+            return 0xA700  
 
-            except (KeyError, LookupError) as e:
+        try:
+            callingAETitle = callingAEList[callingAETitle]
+            
+            qtcLogin = qtcApiLogin('biocheckup1', 'biocheckup1', APP_LOGGER)
+            qtcClinicOid = qtcClinicExist (qtcLogin, callingAETitle)
+            
+            # For test purpose only!
+            # qtcClinicOid = None 
+            
+            qtcApiLogout (qtcLogin,APP_LOGGER)
+
+            if qtcClinicOid is None:
+                raise LookupError 
+
+        except (KeyError, LookupError) as e:
+            
+            #APP_LOGGER.warning(f"AETitle ({callingAETitle}) not in list!")
+            
+            AETitleNotInListNotify = Path('/'.join([
+                config.hermes['error_folder'],
+                '_'.join([callingIP, callingAETitle, 'notInList']),
+            ]))
+            
+            if not AETitleNotInListNotify.exists():
                 
-                #APP_LOGGER.warning(f"AETitle ({callingAETitle}) not in list!")
+                if type(e) == KeyError:
+                    subject = 'Hermes - AET not in list: {} - {}'
+                else:
+                    subject = 'Hermes - Clinic not in qTC: {} - {}'
                 
-                AETitleNotInListNotify = Path('/'.join([
-                    config.hermes['error_folder'],
-                    '_'.join([callingIP, callingAETitle, 'notInList']),
-                ]))
+                try:
+                    APP_LOGGER.warning("Send Telegram msg")
+                    telegram_bot_sendtext(subject.format(callingAETitle, callingIP),APP_LOGGER)
+                    AETitleNotInListNotify.touch()
                 
-                if not AETitleNotInListNotify.exists():
-                    
-                    if type(e) == KeyError:
-                        subject = 'Hermes - AET not in list: {} - {}'
-                    else:
-                        subject = 'Hermes - Clinic not in qTC: {} - {}'
-                    
-                    try:
-                        APP_LOGGER.warning("Send Telegram msg")
-                        telegram_bot_sendtext(subject.format(callingAETitle, callingIP),APP_LOGGER)
-                        AETitleNotInListNotify.touch()
-                    
-                    except Exception as e1:
-                        APP_LOGGER.warning(e1.message)
-                
-                # Not Authorized
-                status_ds.Status = 0x0124
-                status_ds.ErrorComment = 'Not Authorized'
-                return status_ds # Termino la connessione!
+                except Exception as e1:
+                    APP_LOGGER.warning(e1.message)
+            
+            # Not Authorized
+            status_ds.Status = 0x0124
+            status_ds.ErrorComment = 'Not Authorized'
+            return status_ds # Termino la connessione!
         
         # Fetch exam from db-Deid
         # =======================
@@ -558,7 +580,7 @@ def handle_store(event):
         # Tale aggiornamento viene effettuato solo se l'esame è stato trovato "UNICO"
         # (ovvero non è stata generata alcuna eccezione precedentemnte).
 
-        if not PACS_Orig and deidExam['status'] == "RICEVUTO":
+        if deidExam['status'] == "RICEVUTO":
 
             try: 
                 deidExamUpdate (api_deid_path, ds.StudyInstanceUID, resId, "NUOVO" )
@@ -592,9 +614,19 @@ def handle_store(event):
         # Write "information" file
         APP_LOGGER.info(f"Writing file studyProcessed: {studyProcessed}")
         studyProcessed.write_text(json.dumps(deidExam))
-        
-    
 
+        # ========================
+        # eseguita in c_Store prima fase
+        studyProcessedPacsOrig = Path('/'.join([
+            config.hermes['success_folder'],
+            'BCU_check',
+            '_'.join([ "qpacs", str(ds.StudyInstanceUID)])
+        ]))
+
+        studyProcessedPacsOrig.write_text(json.dumps(deidExam))
+        APP_LOGGER.info(f"Writing file studyProcessedPacsOrig: {studyProcessedPacsOrig}")
+
+    
     # Adding StationAETitle
     # =====================
 
@@ -767,17 +799,18 @@ def handle_assoc_release (event):
     APP_LOGGER.debug("event3 = {}".format(event.timestamp))
     APP_LOGGER.debug("event4 = {}".format(event.event))
     APP_LOGGER.debug("event5 = {}".format(event.event.name))
-    
+  
     eventName = event.event.name
     APP_LOGGER.info("Event Name = {}".format(eventName))
    
-    # Event check
-    # ===========
-    # Questo controllo serve ad evitare che venga "eseguito" tale evento 
-    # in caso di altre richiesta (vedi echo) DA VERIFICARE!
-
-    if (eventName != "EVT_RELEASED"):
-        return
+    # Read configuration file
+    # =======================
+    try:
+        config.read_config()
+    
+    except Exception:  
+        APP_LOGGER.error("Unable to read configuration. Skipping processing.")
+        return #0xA700
 
     # Dicom info retrieve
     # ===================
@@ -802,27 +835,8 @@ def handle_assoc_release (event):
         config.hermes['success_folder'], 'BCU_check', fileName ]))  
     )
 
-    # Check AETitle
-    # =============
-    try:
-        callingAETitle = callingAEList[callingAETitle]
-       
-        APP_LOGGER.info(f"InstituionName: {callingAETitle}")
-        # Nota. Nel caso in cui NON venga generata l'eccezione "KeyError", la variabile
-        #       "callingAETitle" viene usata in seguito per la 
-        #       ricerca della clinica (vedi creazione qTC successivamente) 
-    except KeyError:
-        # Nota. Nessun invio tramite telegram poichè lo fa gia l'evento EVT_C_STORE.
-        #       In questo caso ci limitiamo a loggare l'evento e terminare l'esecuzione.
-        APP_LOGGER.warning(f'AETitle ({callingAETitle}) not in list!' )
-        return
+    APP_LOGGER.info(f"fileName ={fileName}")
 
-    # Check if study comes from PACS_Orig
-    # ===================================
-    PACS_Orig = ipaddress.ip_address(callingIP) == ipaddress.ip_address(PACS_ORIG_ADDRESS)
-    APP_LOGGER.info('PACS_Orig? {}'.format(PACS_Orig))
-   
-   
     # Find StudyInstanceUID
     # =====================
     # Quanti file trovo con quel pattern? La seguente funzione restituisce una LISTA!
@@ -831,8 +845,41 @@ def handle_assoc_release (event):
 
     APP_LOGGER.info("studyList = {}".format(studyList) )
 
+    # Check StudyInstanceUID
+    # =====================
+    # Se la studyList è vuota vuol dire che la C_STORE non ha processato alcun StudyInstanceUID
+    # quindi uso questa condizione per capire che non è avvenuta una C_STORE e quindi magari
+    # è stato generato una richiesta diversa. (Es.ECHOSCU)
+    if studyList == []:
+        APP_LOGGER.warning("studyList Empty - No Processing!")
+        return
+
+    # Check if study comes from PACS_Orig
+    # ===================================
+    PACS_Orig = ipaddress.ip_address(callingIP) == ipaddress.ip_address(PACS_ORIG_ADDRESS)
+    APP_LOGGER.info('PACS_Orig? {}'.format(PACS_Orig))
+   
+    # Check AETitle
+    # =============
+    if not PACS_Orig:
+
+        try:
+            callingAETitle = callingAEList[callingAETitle]
+        
+            APP_LOGGER.info(f"InstituionName: {callingAETitle}")
+            # Nota. Nel caso in cui NON venga generata l'eccezione "KeyError", la variabile
+            #       "callingAETitle" viene usata in seguito per la 
+            #       ricerca della clinica (vedi creazione qTC successivamente) 
+        except KeyError:
+            # Nota. Nessun invio tramite telegram poichè lo fa gia l'evento EVT_C_STORE.
+            #       In questo caso ci limitiamo a loggare l'evento e terminare l'esecuzione.
+            APP_LOGGER.warning(f'AETitle ({callingAETitle}) not in list!' )
+            return
+    
+    # Process studyList
+    # =================
     # Vado a ciclare la lista ottenuta. La variabile studyItem contiente ogni filename 
-    # della lista.
+    # della lista (quindi ogni studyInstanceUID)
 
     for studyItem in studyList:
 
@@ -889,7 +936,8 @@ def handle_assoc_release (event):
         if PACS_Orig and status == "IN_DEIDENTIFICAZIONE":
             
             try: 
-                #deidExamUpdate (api_deid_path, studyInstanceUID, resId, "DEIDENTIFICATO" )
+                deidExamUpdate (api_deid_path, studyInstanceUID, resId, "DEIDENTIFICATO" )
+                #APP_LOGGER.info("deidExamUpdate -> DEIDENTIFICATO")
                 pass
             except deidError as err:
                 APP_LOGGER.error ( '{}'.format(err) )
@@ -905,7 +953,9 @@ def handle_assoc_release (event):
         # qTC Login 
         qtcLogin = qtcApiLogin('biocheckup1', 'biocheckup1', APP_LOGGER)
 
-        if qtcExamExist (qtcLogin, studyInstanceUID) is False:
+        #if qtcExamExist (qtcLogin, studyInstanceUID) is False:
+
+        if not PACS_Orig and qtcExamExist (qtcLogin, studyInstanceUID) is False:
 
             # Recupero delle informazioni del "gender" e "modality" direttamente dal file creato 
             # nella C_STORE non avendo il dataset. Tali informazioni sono state
@@ -940,7 +990,7 @@ def handle_assoc_release (event):
                 qtcBuild = qtcExamBuild (pN,deidExam,qtcClinicOid)
 
                 # qTC Create Exam 
-                qtcCreate = qtcExamCreate (qtcLogin,qtcBuild,studyInstanceUID) 
+                #qtcCreate = qtcExamCreate (qtcLogin,qtcBuild,studyInstanceUID) 
     
         # qTC Logout 
         qtcApiLogout (qtcLogin,APP_LOGGER)
