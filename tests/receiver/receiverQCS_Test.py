@@ -580,15 +580,14 @@ def handle_store(event):
         # Tale aggiornamento viene effettuato solo se l'esame è stato trovato "UNICO"
         # (ovvero non è stata generata alcuna eccezione precedentemnte).
 
-        if deidExam['status'] == "RICEVUTO":
+        #if deidExam['status'] == "RICEVUTO": # or DEIDENTIFICATO????
+        if deidExam['status'] in ["RICEVUTO", "CARICATO_ORIG", "DEIDENTIFICATO", "CARICATO_DEID"]:
 
             try: 
                 deidExamUpdate (api_deid_path, ds.StudyInstanceUID, resId, "NUOVO" )
 
             except deidError as err:
-                
-                # bloccare!!
-                
+            
                 APP_LOGGER.error ( '{}'.format(err) )
                 return    
             
@@ -605,7 +604,15 @@ def handle_store(event):
              # For qTC
             'gender'            : ds.get("PatientSex","M"),
             'modality'          : ds.get("Modality", ''),
-        }
+             
+            # Nota. Il qtcClinicOid viene inserito in questo file poichè
+            #       nella EVT_RELEASE (PACS_Orig- fase 2) non ho disponibile
+            #       questa informazione poichè in tale fase il callingAET è qpacs
+            #       e quindi non potrei trovare l'istitution e di conseguenza la clinica.
+            #       siccome per il controllo dell'esame qTC (anche nella fase2) 
+            #       è necessaria la clinica ecco il motivo per cui viene salvato.
+            'qtcClinicOid'      : qtcClinicOid, 
+        }   
         
         # Check for file
         bcuCheckDir = Path('/'.join([ config.hermes['success_folder'], 'BCU_check' ]))
@@ -955,7 +962,7 @@ def handle_assoc_release (event):
 
         #if qtcExamExist (qtcLogin, studyInstanceUID) is False:
 
-        if not PACS_Orig and qtcExamExist (qtcLogin, studyInstanceUID) is False:
+        if qtcExamExist (qtcLogin, studyInstanceUID) is False:
 
             # Recupero delle informazioni del "gender" e "modality" direttamente dal file creato 
             # nella C_STORE non avendo il dataset. Tali informazioni sono state
@@ -967,7 +974,7 @@ def handle_assoc_release (event):
             
             newKeys = json.loads( studyItem.read_text() )
 
-            APP_LOGGER.debug(f"newKeys: gender = {newKeys['gender']} - modality = {newKeys['modality']}")
+            APP_LOGGER.debug(f"newKeys: gender = {newKeys['gender']} - modality = {newKeys['modality']} - qtcClinicOid = {newKeys['qtcClinicOid']}")
 
             deidExam['patient']['gender']   = newKeys['gender']
             deidExam['modality']            = newKeys['modality']
@@ -982,9 +989,12 @@ def handle_assoc_release (event):
             # *** Testing purpose only ***
 
             # qTc Clinic and callingAETitle
-            qtcClinicOid = qtcClinicExist (qtcLogin, callingAETitle)
+            # Nota. La clinica viene ricavata dal file (vedi nota riga: 609)
+            qtcClinicOid =  newKeys['qtcClinicOid'] #qtcClinicExist (qtcLogin, callingAETitle)
 
             if qtcClinicOid is not None:
+
+                APP_LOGGER.info(f"qtcClinicOid(from FILE):{qtcClinicOid}")
 
                 # qTC Build Exam (from deid) 
                 qtcBuild = qtcExamBuild (pN,deidExam,qtcClinicOid)
